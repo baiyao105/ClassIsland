@@ -1,0 +1,31 @@
+diff --git a/ClassIsland.Core/Controls/DevelopmentBuildAdorner.axaml b/ClassIsland.Core/Controls/DevelopmentBuildAdorner.axaml
+index 11a9107b..f0f08d0d 100644
+--- a/ClassIsland.Core/Controls/DevelopmentBuildAdorner.axaml
++++ b/ClassIsland.Core/Controls/DevelopmentBuildAdorner.axaml
+@@ -13,8 +13,7 @@
+             <TextBlock VerticalAlignment="Bottom"
+                        HorizontalAlignment="Left"
+                        FontSize="12"
+-                       Opacity="0.8"
+-                       IsVisible="{Binding IsDevelopmentBuild, RelativeSource={RelativeSource TemplatedParent}}">
++                       Opacity="0.8">
+                 <Run Text="开发中画面，不代表最终品质。"/><LineBreak/>
+                 <Run Text="{x:Static core:AppBase.AppVersionLong}"/>
+             </TextBlock>
+diff --git a/ClassIsland/App.axaml.cs b/ClassIsland/App.axaml.cs
+index a2bc0169..40c4741f 100644
+--- a/ClassIsland/App.axaml.cs
++++ b/ClassIsland/App.axaml.cs
+@@ -102,11 +102,7 @@ public partial class App : AppBase, IAppHost
+     }
+ 
+     public override bool IsDevelopmentBuild =>
+-#if DevelopmentBuild
+         true
+-#else
+-        false
+-#endif
+     ;
+ 
+     public override bool IsMsix => _isMsix;
+

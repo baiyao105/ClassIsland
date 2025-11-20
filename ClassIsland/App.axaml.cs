@@ -103,11 +103,7 @@ public partial class App : AppBase, IAppHost
     }
 
     public override bool IsDevelopmentBuild =>
-#if DevelopmentBuild
         true
-#else
-        false
-#endif
     ;
 
     public override bool IsMsix => _isMsix;
