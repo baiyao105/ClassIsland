@@ -1,4 +1,4 @@
-﻿<controls:ComponentBase x:TypeArguments="componentSettings:ClockComponentSettings" 
+<controls:ComponentBase x:TypeArguments="componentSettings:ClockComponentSettings" 
                         x:Class="ClassIsland.Controls.Components.ClockComponent"
                         xmlns="https://github.com/avaloniaui"
                         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -13,30 +13,31 @@
     <Grid VerticalAlignment="Center" HorizontalAlignment="Center"
           TextElement.FontSize="{DynamicResource MainWindowEmphasizedFontSize}"
           x:Name="Root"
-          Classes.TimeSeparatorShowing="{Binding IsTimeSeparatorShowing}"
-          Classes.ShowSeconds="{Binding Settings.ShowSeconds}"
           DataContext="{Binding RelativeSource={RelativeSource FindAncestor, AncestorType=local:ClockComponent}}">
-        <Grid.Styles>
-            <Style Selector="Grid#Root">
-                <Style Selector="^ TextBlock#TextBlock1">
-                    <Setter Property="Opacity" Value="0" />
-                    <Setter Property="Text" Value="{Binding CurrentTime, StringFormat={}{0:HH:mm}}" />
-                </Style>
-                <Style Selector="^.TimeSeparatorShowing TextBlock#TextBlock1">
-                    <Setter Property="Opacity" Value="1" />
-                </Style>
-                <Style Selector="^.ShowSeconds TextBlock#TextBlock1">
-                    <Setter Property="Text" Value="{Binding CurrentTime, StringFormat={}{0:HH:mm:ss}}" />
-                </Style>
-            </Style>
-        </Grid.Styles>
-        <TextBlock x:Name="TextBlock1" />
-        <TextBlock HorizontalAlignment="Left"
-                   Text="{Binding CurrentTime, StringFormat={}{0:HH}}"
-                   Classes.hidden="{Binding IsTimeSeparatorShowing}"/>
-        <TextBlock HorizontalAlignment="Right"
-                   Text="{Binding CurrentTime, StringFormat={}{0:mm}}"
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto"/>
+            <ColumnDefinition Width="Auto"/>
+            <ColumnDefinition Width="Auto"/>
+            <ColumnDefinition Width="Auto"/>
+            <ColumnDefinition Width="Auto"/>
+        </Grid.ColumnDefinitions>
+        <TextBlock Grid.Column="0"
+                   HorizontalAlignment="Left"
+                   Text="{Binding CurrentTime, StringFormat={}{0:HH}}"/>
+        <TextBlock Grid.Column="1"
+                   Text=":"
+                   Classes.hidden="{Binding !IsTimeSeparatorShowing}"/>
+        <TextBlock Grid.Column="2"
+                   HorizontalAlignment="Right"
                    TextAlignment="End"
-                   Classes.hidden="{Binding IsTimeSeparatorShowing}"/>
+                   Text="{Binding CurrentTime, StringFormat={}{0:mm}}"/>
+        <TextBlock Grid.Column="3"
+                   Text=":"
+                   IsVisible="{Binding Settings.ShowSeconds}"/>
+        <TextBlock Grid.Column="4"
+                   HorizontalAlignment="Right"
+                   TextAlignment="End"
+                   IsVisible="{Binding Settings.ShowSeconds}"
+                   Text="{Binding CurrentTime, StringFormat={}{0:ss}}"/>
     </Grid>
 </controls:ComponentBase>
