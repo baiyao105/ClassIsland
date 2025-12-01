@@ -97,7 +97,7 @@ public class NotificationRequest : ObservableRecipient
     }
 
     /// <summary>
-    /// 目标提醒结束时间。如果此项不为null，那么在显示此提醒时，自动将<see cref="OverlayDuration"/>设置为距离此值的时长。
+    /// 目标提醒结束时间。如果此项不为null，那么在显示此提醒时，自动将<see cref="OverlayDuration"/>设置为此值的时长。
     /// </summary>
     public DateTime? TargetOverlayEndTime
     {
