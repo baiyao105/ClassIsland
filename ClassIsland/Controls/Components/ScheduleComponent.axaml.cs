@@ -27,7 +27,7 @@ namespace ClassIsland.Controls.Components;
 /// </summary>
 [MigrateFrom("E7831603-61A0-4180-B51B-54AD75B1A4D3")]  // 课程表（旧）
 [ComponentInfo("1DB2017D-E374-4BC6-9D57-0B4ADF03A6B8", "课程表", "\ue751", "显示当前的课程表信息。")]
-[PseudoClasses(":show-tomorrow-schedule", ":show-tomorrow-schedule-after-school", ":show-tomorrow-schedule-always")]
+[PseudoClasses(":show-tomorrow-schedule", ":show-tomorrow-schedule-on-empty", ":show-tomorrow-schedule-always")]
 public partial class ScheduleComponent : ComponentBase<LessonControlSettings>, INotifyPropertyChanged
 {
     private bool _hideFinishedClass;
@@ -147,7 +147,11 @@ public partial class ScheduleComponent : ComponentBase<LessonControlSettings>, I
             .Subscribe(_ => CheckTomorrowClassShowMode());
         _hideFinishedClassObserver ??= Settings
             .ObservableForProperty(x => x.HideFinishedClass)
-            .Subscribe(_ => HideFinishedClass = Settings.HideFinishedClass);
+            .Subscribe(_ =>
+            {
+                HideFinishedClass = Settings.HideFinishedClass;
+                UpdateTomorrowVisibility();
+            });
         _showEmptyPlaceholderObserver ??= Settings
             .ObservableForProperty(x => x.ShowPlaceholderOnEmptyClassPlan)
             .Subscribe(_ => ShowEmptyPlaceholder = Settings.ShowPlaceholderOnEmptyClassPlan);
@@ -155,13 +159,14 @@ public partial class ScheduleComponent : ComponentBase<LessonControlSettings>, I
         HideFinishedClass = Settings.HideFinishedClass;
         ShowEmptyPlaceholder = Settings.ShowPlaceholderOnEmptyClassPlan;
         MainLessonsListBox.SelectedIndex = LessonsListBoxSelectedIndex;
+        UpdateTomorrowVisibility();
     }
 
     private void CheckTomorrowClassShowMode()
     {
         PseudoClasses.Set(":show-tomorrow-schedule", Settings.TomorrowScheduleShowMode is 1 or 2);
-        PseudoClasses.Set(":show-tomorrow-schedule-after-school", Settings.TomorrowScheduleShowMode is 1);
         PseudoClasses.Set(":show-tomorrow-schedule-always", Settings.TomorrowScheduleShowMode is 2);
+        UpdateTomorrowVisibility();
     }
 
     private void LessonsServiceOnPropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -175,6 +180,7 @@ public partial class ScheduleComponent : ComponentBase<LessonControlSettings>, I
     private void OnLessonsServiceOnCurrentTimeStateChanged(object? o, EventArgs eventArgs)
     {
         CurrentTimeStateChanged();
+        UpdateTomorrowVisibility();
     }
 
     private void CurrentTimeStateChanged()
@@ -207,6 +213,59 @@ public partial class ScheduleComponent : ComponentBase<LessonControlSettings>, I
         ShowCurrentLessonOnlyOnClass = settingsSource.ShowCurrentLessonOnlyOnClass;
         TomorrowClassPlan = LessonsService.GetClassPlanByDate(ExactTimeService.GetCurrentLocalDateTime() + TimeSpan.FromDays(1));
         MainLessonsListBox.SelectedIndex = LessonsListBoxSelectedIndex;
+        UpdateTomorrowVisibility();
+    }
+
+    private void UpdateTomorrowVisibility()
+    {
+        // 仅当设置为“无展示课程时显示”时生效
+        var showOnEmpty = Settings.TomorrowScheduleShowMode == 1;
+        if (!showOnEmpty)
+        {
+            PseudoClasses.Set(":show-tomorrow-schedule-on-empty", false);
+            return;
+        }
+
+        // 计算当前是否没有可展示的课程项
+        var now = ExactTimeService.GetCurrentLocalDateTime().TimeOfDay;
+        var selectedItem = LessonsService.CurrentTimeLayoutItem;
+        var classPlan = LessonsService.CurrentClassPlan;
+        bool hasDisplayable = false;
+
+        if (classPlan?.ValidTimeLayoutItems is { Count: > 0 })
+        {
+            foreach (var item in classPlan.ValidTimeLayoutItems)
+            {
+                // 跳过“行动”类型
+                if (item.TimeType == 3)
+                    continue;
+                // 分割线不计入“有展示课程”
+                if (item.TimeType == 2)
+                    continue;
+
+                // 已结束判定（分割线用开始时间，其它用结束时间）
+                var pointTime = item.EndTime;
+                if (HideFinishedClass && pointTime < now)
+                    continue;
+
+                // 默认隐藏：仅在被选中时显示；否则不展示
+                if (item.IsHideDefault && !Equals(selectedItem, item))
+                    continue;
+
+                // 课间：仅在被选中时展示；否则不展示
+                if (item.TimeType == 1 && !Equals(selectedItem, item))
+                    continue;
+
+                // 上课时仅显示当前课程：当选中项为上课类型且非本项，则不展示
+                if (ShowCurrentLessonOnlyOnClass && selectedItem?.TimeType == 0 && !Equals(selectedItem, item))
+                    continue;
+
+                hasDisplayable = true;
+                break;
+            }
+        }
+
+        PseudoClasses.Set(":show-tomorrow-schedule-on-empty", !hasDisplayable);
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
