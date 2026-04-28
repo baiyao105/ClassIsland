@@ -315,11 +315,11 @@ public class ClassNotificationProvider : NotificationProviderBase<ClassNotificat
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
-        return new Task(() => {});
+        return Task.CompletedTask;
     }
 
     public Task StopAsync(CancellationToken cancellationToken)
     {
-        return new Task(() => { });
+        return Task.CompletedTask;
     }
 }
