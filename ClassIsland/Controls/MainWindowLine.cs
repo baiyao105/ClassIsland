@@ -240,6 +240,70 @@ public class MainWindowLine : ContentControl, INotificationConsumer, INotificati
         set => SetValue(CountdownProgressValueProperty, value);
     }
 
+    public static readonly StyledProperty<bool> IsMaskAnimatingProperty = AvaloniaProperty.Register<MainWindowLine, bool>(
+        nameof(IsMaskAnimating));
+
+    public bool IsMaskAnimating
+    {
+        get => GetValue(IsMaskAnimatingProperty);
+        set => SetValue(IsMaskAnimatingProperty, value);
+    }
+
+    public static readonly StyledProperty<bool> IsOverlayAnimatingProperty = AvaloniaProperty.Register<MainWindowLine, bool>(
+        nameof(IsOverlayAnimating));
+
+    public bool IsOverlayAnimating
+    {
+        get => GetValue(IsOverlayAnimatingProperty);
+        set => SetValue(IsOverlayAnimatingProperty, value);
+    }
+
+    public static readonly StyledProperty<bool> IsMaskInProperty = AvaloniaProperty.Register<MainWindowLine, bool>(
+        nameof(IsMaskIn));
+
+    public bool IsMaskIn
+    {
+        get => GetValue(IsMaskInProperty);
+        set => SetValue(IsMaskInProperty, value);
+    }
+
+    public static readonly StyledProperty<bool> IsOverlayInProperty = AvaloniaProperty.Register<MainWindowLine, bool>(
+        nameof(IsOverlayIn));
+
+    public bool IsOverlayIn
+    {
+        get => GetValue(IsOverlayInProperty);
+        set => SetValue(IsOverlayInProperty, value);
+    }
+
+    public static readonly StyledProperty<bool> IsMaskOutProperty = AvaloniaProperty.Register<MainWindowLine, bool>(
+        nameof(IsMaskOut));
+
+    public bool IsMaskOut
+    {
+        get => GetValue(IsMaskOutProperty);
+        set => SetValue(IsMaskOutProperty, value);
+    }
+
+    public static readonly StyledProperty<bool> IsOverlayOutProperty = AvaloniaProperty.Register<MainWindowLine, bool>(
+        nameof(IsOverlayOut));
+
+    public bool IsOverlayOut
+    {
+        get => GetValue(IsOverlayOutProperty);
+        set => SetValue(IsOverlayOutProperty, value);
+    }
+
+    private static readonly Dictionary<AvaloniaProperty, string> PseudoClassMap = new()
+    {
+        [IsMaskAnimatingProperty] = ":mask-anim",
+        [IsOverlayAnimatingProperty] = ":overlay-anim",
+        [IsMaskInProperty] = ":mask-in",
+        [IsOverlayInProperty] = ":overlay-in",
+        [IsMaskOutProperty] = ":mask-out",
+        [IsOverlayOutProperty] = ":overlay-out",
+    };
+
     public static readonly StyledProperty<NotificationRequest> CurrentNotificationRequestProperty = AvaloniaProperty.Register<MainWindowLine, NotificationRequest>(
         nameof(CurrentNotificationRequest), new NotificationRequest());
 
@@ -416,6 +480,15 @@ public class MainWindowLine : ContentControl, INotificationConsumer, INotificati
         PseudoClasses.Set(":dock-right", WindowDockingLocation is 2 or 5);
         PseudoClasses.Set(":dock-top", WindowDockingLocation is 0 or 1 or 2);
         PseudoClasses.Set(":dock-bottom", WindowDockingLocation is 3 or 4 or 5);
+    }
+
+    protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
+    {
+        base.OnPropertyChanged(change);
+        if (PseudoClassMap.TryGetValue(change.Property, out var pseudo))
+        {
+            PseudoClasses.Set(pseudo, change.GetNewValue<bool>());
+        }
     }
 
     private void UpdateVisibilityState(object? sender, RoutedEventArgs args)
@@ -687,10 +760,10 @@ public class MainWindowLine : ContentControl, INotificationConsumer, INotificati
             CurrentNotificationRequest = request;
             PreProcessNotificationContent(request.MaskContent);
 
-            PseudoClasses.Set(":mask-anim", false);
-            PseudoClasses.Set(":overlay-out", false);
-            PseudoClasses.Set(":mask-in", false);
-            PseudoClasses.Set(":mask-out", false);
+            IsMaskAnimating = false;
+            IsOverlayOut = false;
+            IsMaskIn = false;
+            IsMaskOut = false;
             MaskContent = request.MaskContent; // 加载 Mask 元素
 
             if (settings.IsNotificationTopmostEnabled && SettingsService.Settings.AllowNotificationTopmost)
@@ -702,9 +775,9 @@ public class MainWindowLine : ContentControl, INotificationConsumer, INotificati
                 MainWindow.ReleaseTopmostLock(TopmostLock);
             }
 
-            PseudoClasses.Set(":mask-anim", true);
-            PseudoClasses.Set(":mask-in", true);
-            PseudoClasses.Set(":overlay-anim", false);
+            IsMaskAnimating = true;
+            IsMaskIn = true;
+            IsOverlayAnimating = false;
 
             // 播放提醒特效
             if (settings.IsNotificationEffectEnabled && SettingsService.Settings.AllowNotificationEffect &&
@@ -724,20 +797,20 @@ public class MainWindowLine : ContentControl, INotificationConsumer, INotificati
         {
             if (request.OverlayContent == null)
             {
-                PseudoClasses.Set(":overlay-anim", true);
-                PseudoClasses.Set(":mask-in", false);
-                PseudoClasses.Set(":mask-out", true);
-                PseudoClasses.Set(":overlay-in", false);
-                PseudoClasses.Set(":overlay-out", true);
+                IsOverlayAnimating = true;
+                IsMaskIn = false;
+                IsMaskOut = true;
+                IsOverlayIn = false;
+                IsOverlayOut = true;
                 return;
             }
 
             PreProcessNotificationContent(request.OverlayContent);
             OverlayContent = request.OverlayContent;
-            PseudoClasses.Set(":mask-out", true);
-            PseudoClasses.Set(":mask-in", false);
-            PseudoClasses.Set(":overlay-out", false);
-            PseudoClasses.Set(":overlay-in", true);
+            IsMaskOut = true;
+            IsMaskIn = false;
+            IsOverlayOut = false;
+            IsOverlayIn = true;
         });
     }
 
@@ -745,11 +818,11 @@ public class MainWindowLine : ContentControl, INotificationConsumer, INotificati
     {
         Dispatcher.UIThread.PostIfNeeded(() =>
         {
-            PseudoClasses.Set(":overlay-anim", true);
-            PseudoClasses.Set(":mask-out", true);
-            PseudoClasses.Set(":mask-in", false);
-            PseudoClasses.Set(":overlay-out", true);
-            PseudoClasses.Set(":overlay-in", false);
+            IsOverlayAnimating = true;
+            IsMaskOut = true;
+            IsMaskIn = false;
+            IsOverlayOut = true;
+            IsOverlayIn = false;
 
             OverlayContent = null;
             MaskContent = null;
