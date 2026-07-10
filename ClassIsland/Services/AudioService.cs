@@ -136,7 +136,8 @@ public class AudioService(ILogger<AudioService> logger) : IAudioService
         try
         {
             player.Play();
-            tcs.Task.Wait();  // 不要在此处 await，否则会导致设备停止过程阻塞，无法完成播放流程。
+            // 
+            tcs.Task.Wait();  // DEBT: SoundFlow限制无法await, 在此处 await, 会导致设备停止过程阻塞, 无法完成播放流程。
         }
         finally
         {

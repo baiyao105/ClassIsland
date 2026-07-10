@@ -8,6 +8,7 @@ namespace ClassIsland.Core.Models.Notification;
 
 /// <summary>
 /// 代表一个提醒请求。
+/// DEBT: 类职责过重 (God Object)
 /// </summary>
 public class NotificationRequest : ObservableRecipient
 {

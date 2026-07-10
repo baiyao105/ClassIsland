@@ -728,7 +728,7 @@ public class NotificationHostService(SettingsService settingsService, ILogger<No
                 Logger.LogTrace(ex, "等待取消完成时发生异常");
             }
 
-            // 因为时态问题打的补丁.
+            // DEBT: 因为时态问题打的补丁.
             if (request.State == NotificationState.Playing)
             {
                 var stateChangedSource = new TaskCompletionSource();
