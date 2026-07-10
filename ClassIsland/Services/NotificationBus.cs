@@ -16,13 +16,10 @@ public class NotificationBus : INotificationBus
     public event Action<NotificationRequest, NotificationState, NotificationState>? StateChanged;
 
     /// <inheritdoc />
-    public event Func<INotificationConsumer, IList<NotificationPlayingTicket>>? PullRequested;
+    public event Action<INotificationConsumer>? ConsumerBecameIdle;
 
     /// <inheritdoc />
     public event Action<INotificationConsumer>? ConsumerRemoved;
-
-    /// <inheritdoc />
-    public event Action? DispatchRequested;
 
     /// <inheritdoc />
     public void RaiseStateChanged(NotificationRequest request, NotificationState from, NotificationState to)
@@ -31,20 +28,14 @@ public class NotificationBus : INotificationBus
     }
 
     /// <inheritdoc />
-    public IList<NotificationPlayingTicket> RaisePullRequested(INotificationConsumer consumer)
+    public void RaiseConsumerBecameIdle(INotificationConsumer consumer)
     {
-        return PullRequested?.Invoke(consumer) ?? [];
+        ConsumerBecameIdle?.Invoke(consumer);
     }
 
     /// <inheritdoc />
     public void RaiseConsumerRemoved(INotificationConsumer consumer)
     {
         ConsumerRemoved?.Invoke(consumer);
-    }
-
-    /// <inheritdoc />
-    public void RaiseDispatchRequested()
-    {
-        DispatchRequested?.Invoke();
     }
 }

@@ -116,28 +116,6 @@ public class NotificationPlaybackService : INotificationPlaybackService
             {
                 NotificationPlayingTicket ticket;
                 INotificationPlaybackHandler handler;
-                bool needPull = false;
-                lock (_syncLock)
-                {
-                    if (session.Queue.Count == 0)
-                    {
-                        needPull = true;
-                    }
-                }
-                if (needPull)
-                {
-                    var pulledTickets = Bus.RaisePullRequested(consumer);
-                    if (pulledTickets.Count > 0)
-                    {
-                        lock (_syncLock)
-                        {
-                            foreach (var t in pulledTickets)
-                            {
-                                session.Queue.Enqueue(t);
-                            }
-                        }
-                    }
-                }
                 lock (_syncLock)
                 {
                     if (session.Queue.Count == 0)
@@ -146,7 +124,7 @@ public class NotificationPlaybackService : INotificationPlaybackService
                         var h = session.Handler;
                         _sessions.Remove(consumer);
                         h?.OnPlaybackCompleted();
-                        Bus.RaiseDispatchRequested();
+                        Bus.RaiseConsumerBecameIdle(consumer);
                         return;
                     }
                     ticket = session.Queue.Dequeue();
@@ -168,7 +146,7 @@ public class NotificationPlaybackService : INotificationPlaybackService
                     {
                         session.PlayingTickets.Remove(ticket);
                     }
-                    Bus.RaiseDispatchRequested();
+                    Bus.RaiseConsumerBecameIdle(consumer);
                 }
             }
         }
@@ -181,7 +159,7 @@ public class NotificationPlaybackService : INotificationPlaybackService
                 _sessions.Remove(consumer);
             }
             try { session.Handler?.OnPlaybackCompleted(); } catch { }
-            Bus.RaiseDispatchRequested();
+            Bus.RaiseConsumerBecameIdle(consumer);
         }
     }
 

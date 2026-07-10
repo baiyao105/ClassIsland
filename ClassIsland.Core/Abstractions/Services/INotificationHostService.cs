@@ -78,13 +78,6 @@ public interface INotificationHostService : IHostedService, INotifyPropertyChang
     public void UnregisterNotificationConsumer(INotificationConsumer consumer);
 
     /// <summary>
-    /// 拉取下一个可用的提醒请求。
-    /// </summary>
-    /// <param name="consumer">正在拉取提醒的消费者</param>
-    /// <returns>提醒票据列表</returns>
-    public IList<NotificationPlayingTicket> PullNotificationRequests(INotificationConsumer consumer);
-    
-    /// <summary>
     /// 分发队列中提醒组到消费者。
     /// </summary>
     public void PopGroupsToConsumers();

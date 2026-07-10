@@ -19,17 +19,12 @@ public interface INotificationBus
     /// <summary>
     /// 请求拉取事件
     /// </summary>
-    event Func<INotificationConsumer, IList<NotificationPlayingTicket>>? PullRequested;
+    event Action<INotificationConsumer>? ConsumerBecameIdle;
 
     /// <summary>
     /// 消费者移除事件
     /// </summary>
     event Action<INotificationConsumer>? ConsumerRemoved;
-
-    /// <summary>
-    /// 分发请求事件
-    /// </summary>
-    event Action? DispatchRequested;
 
     /// <summary>
     /// 发布状态变更事件
@@ -39,15 +34,10 @@ public interface INotificationBus
     /// <summary>
     /// 发布拉取请求事件并返回结果
     /// </summary>
-    IList<NotificationPlayingTicket> RaisePullRequested(INotificationConsumer consumer);
+    void RaiseConsumerBecameIdle(INotificationConsumer consumer);
 
     /// <summary>
     /// 发布消费者移除事件
     /// </summary>
     void RaiseConsumerRemoved(INotificationConsumer consumer);
-
-    /// <summary>
-    /// 发布分发请求事件
-    /// </summary>
-    void RaiseDispatchRequested();
 }

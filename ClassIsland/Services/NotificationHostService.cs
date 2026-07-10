@@ -345,8 +345,7 @@ public class NotificationHostService(SettingsService settingsService, ILogger<No
     public Task StartAsync(CancellationToken cancellationToken)
     {
         Bus.StateChanged += OnBusStateChanged;
-        Bus.PullRequested += OnBusPullRequested;
-        Bus.DispatchRequested += OnBusDispatchRequested;
+        Bus.ConsumerBecameIdle += OnBusConsumerBecameIdle;
         Bus.ConsumerRemoved += OnBusConsumerRemoved;
         return Task.CompletedTask;
     }
@@ -356,12 +355,7 @@ public class NotificationHostService(SettingsService settingsService, ILogger<No
         TransitionRequestState(request, to);
     }
 
-    private IList<NotificationPlayingTicket> OnBusPullRequested(INotificationConsumer consumer)
-    {
-        return PullNotificationRequests(consumer);
-    }
-
-    private void OnBusDispatchRequested()
+    private void OnBusConsumerBecameIdle(INotificationConsumer consumer)
     {
         PopGroupsToConsumers();
     }
@@ -385,8 +379,7 @@ public class NotificationHostService(SettingsService settingsService, ILogger<No
             _isStopping = true;
         }
         Bus.StateChanged -= OnBusStateChanged;
-        Bus.PullRequested -= OnBusPullRequested;
-        Bus.DispatchRequested -= OnBusDispatchRequested;
+        Bus.ConsumerBecameIdle -= OnBusConsumerBecameIdle;
         Bus.ConsumerRemoved -= OnBusConsumerRemoved;
         CancelAllNotifications();
         return Task.CompletedTask;
@@ -528,70 +521,6 @@ public class NotificationHostService(SettingsService settingsService, ILogger<No
         return true;
     }
 
-    public IList<NotificationPlayingTicket> PullNotificationRequests(INotificationConsumer consumer)
-    {
-        lock (_syncLock)
-        {
-            if (!CanDispatchRequests)
-            {
-                return [];
-            }
-
-            var consumerInfo = RegisteredConsumers.FirstOrDefault(x => x.Consumer == consumer);
-            if (consumerInfo == null)
-            {
-                return [];
-            }
-
-            while (RequestQueue.Count > 0)
-            {
-                var currentGroup = RequestQueue.Peek();
-                if (PoppedGroups.Contains(currentGroup))
-                {
-                    RequestQueue.Dequeue();
-                    EnqueuedGroups.Remove(currentGroup);
-                    PoppedGroups.Remove(currentGroup);
-                    continue;
-                }
-                if (currentGroup.ValidUntil.HasValue && ExactTimeService.GetCurrentLocalDateTime() > currentGroup.ValidUntil.Value)
-                {
-                    RequestQueue.Dequeue();
-                    EnqueuedGroups.Remove(currentGroup);
-                    Logger.LogWarning("通知组已过期, 丢弃: {}", currentGroup.Head);
-                    foreach (var r in currentGroup.Requests)
-                    {
-                        try { r.Lifecycle.Cancel(); } catch (ObjectDisposedException) { }
-                    }
-                    continue;
-                }
-
-                var activeRequests = currentGroup.CollectActiveRequests();
-                if (activeRequests.Count == 0)
-                {
-                    RequestQueue.Dequeue();
-                    EnqueuedGroups.Remove(currentGroup);
-                    continue;
-                }
-
-                var targetLine = activeRequests[0].TargetLineNumber;
-                if (targetLine != null && consumerInfo.LineNumber != targetLine)
-                {
-                    return [];
-                }
-
-                var tickets = activeRequests.Select(CreateTicket).ToList();
-                RequestQueue.Dequeue();
-                EnqueuedGroups.Remove(currentGroup);
-                PoppedGroups.Add(currentGroup);
-
-                UpdateNotificationPlayingState();
-                return tickets;
-            }
-
-            return [];
-        }
-    }
-
     public void PopGroupsToConsumers()
     {
         List<(NotificationConsumerRegisterInfo consumer, List<NotificationPlayingTicket> tickets)> batches = [];
@@ -604,6 +533,7 @@ public class NotificationHostService(SettingsService settingsService, ILogger<No
             }
 
             var processedGroups = new HashSet<NotificationGroup>();
+            var skippedGroups = new List<NotificationGroup>();
             while (RequestQueue.Count > 0)
             {
                 var currentGroup = RequestQueue.Peek();
@@ -640,13 +570,21 @@ public class NotificationHostService(SettingsService settingsService, ILogger<No
 
                 var consumer = RouteRequests(currentGroup);
                 if (consumer == null)
-                    break;
+                {
+                    skippedGroups.Add(RequestQueue.Dequeue());
+                    continue;
+                }
                 var tickets = activeRequests.Select(CreateTicket).ToList();
                 RequestQueue.Dequeue();
                 EnqueuedGroups.Remove(currentGroup);
                 PoppedGroups.Add(currentGroup);
                 UpdateNotificationPlayingState();
                 batches.Add((consumer, tickets));
+            }
+
+            foreach (var g in skippedGroups)
+            {
+                RequestQueue.Enqueue(g, GetNotificationPriority(g.Head, true));
             }
         }
         
@@ -679,15 +617,20 @@ public class NotificationHostService(SettingsService settingsService, ILogger<No
 
             var registerInfo = new NotificationConsumerRegisterInfo(consumer, priority, lineNumber);
 
+            var inserted = false;
             for (var i = 0; i < RegisteredConsumers.Count; i++)
             {
                 if (RegisteredConsumers[i].Priority <= registerInfo.Priority)
                     continue;
                 RegisteredConsumers.Insert(i, registerInfo);
-                return;
+                inserted = true;
+                break;
             }
 
-            RegisteredConsumers.Add(registerInfo);
+            if (!inserted)
+            {
+                RegisteredConsumers.Add(registerInfo);
+            }
         }
         if (CanDispatchRequests)
         {
