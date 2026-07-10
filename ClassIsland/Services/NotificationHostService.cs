@@ -13,6 +13,7 @@ using ClassIsland.Core.Abstractions;
 using ClassIsland.Core.Abstractions.Services;
 using ClassIsland.Core.Abstractions.Services.NotificationProviders;
 using ClassIsland.Core.Enums.Notification;
+using ClassIsland.Core.Extensions.UI;
 using ClassIsland.Core.Models.Notification;
 using ClassIsland.Core.Services.Registry;
 using ClassIsland.Shared;
@@ -240,11 +241,11 @@ public class NotificationHostService(SettingsService settingsService, ILogger<No
 
     public async Task ShowNotificationAsync(NotificationRequest request, Guid providerGuid, Guid channelGuid)
     {
-        var tcs = new TaskCompletionSource();
-        await Dispatcher.UIThread.InvokeAsync(() =>
+        var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        request.CompletedToken.Register(() => tcs.TrySetResult());
+        await Dispatcher.UIThread.InvokeIfNeededAsync(() =>
         {
             ShowNotification(request, providerGuid, channelGuid, true, false);
-            request.CompletedToken.Register(() => tcs.TrySetResult());
         });
         await tcs.Task;
     }
@@ -308,11 +309,11 @@ public class NotificationHostService(SettingsService settingsService, ILogger<No
             return;
         }
 
-        var tcs = new TaskCompletionSource();
-        await Dispatcher.UIThread.InvokeAsync(() =>
+        var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        requests.Last().CompletedToken.Register(() => tcs.TrySetResult());
+        await Dispatcher.UIThread.InvokeIfNeededAsync(() =>
         {
             ShowChainedNotifications(requests, providerGuid, channelGuid);
-            requests.Last().CompletedToken.Register(() => tcs.TrySetResult());
         });
         await tcs.Task;
     }

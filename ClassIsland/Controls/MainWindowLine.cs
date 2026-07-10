@@ -28,6 +28,7 @@ using Avalonia.Reactive;
 using Avalonia.Rendering.Composition;
 using Avalonia.Styling;
 using Avalonia.Threading;
+using ClassIsland.Core.Extensions.UI;
 using Avalonia.VisualTree;
 using ClassIsland.Controls.NotificationEffects;
 using ClassIsland.Core;
@@ -666,7 +667,7 @@ public class MainWindowLine : ContentControl, INotificationConsumer, INotificati
 
     public async Task OnPlayMaskAsync(NotificationRequest request, INotificationSettings settings)
     {
-        await Dispatcher.UIThread.InvokeAsync(() =>
+        await Dispatcher.UIThread.InvokeIfNeededAsync(() =>
         {
             if (_firstProcessNotificationsTime == DateTime.MinValue)
                 _firstProcessNotificationsTime = ExactTimeService.GetCurrentLocalDateTime();
@@ -719,7 +720,7 @@ public class MainWindowLine : ContentControl, INotificationConsumer, INotificati
 
     public async Task OnPlayOverlayAsync(NotificationRequest request, INotificationSettings settings)
     {
-        await Dispatcher.UIThread.InvokeAsync(() =>
+        await Dispatcher.UIThread.InvokeIfNeededAsync(() =>
         {
             if (request.OverlayContent == null)
             {
@@ -742,7 +743,7 @@ public class MainWindowLine : ContentControl, INotificationConsumer, INotificati
 
     public void OnPlaybackCompleted()
     {
-        Dispatcher.UIThread.Post(() =>
+        Dispatcher.UIThread.PostIfNeeded(() =>
         {
             PseudoClasses.Set(":overlay-anim", true);
             PseudoClasses.Set(":mask-out", true);
