@@ -177,16 +177,24 @@ public class NotificationPlaybackService(ILogger<NotificationPlaybackService> lo
 
         try
         {
-            if (request.MaskContent.Duration > TimeSpan.Zero && !cancellationToken.IsCancellationRequested)
+            var hasMask = request.MaskContent.Duration > TimeSpan.Zero;
+            var hasOverlay = request.OverlayContent != null && request.OverlayContent.Duration > TimeSpan.Zero;
+
+            if (hasMask && !cancellationToken.IsCancellationRequested)
             {
                 await handler.OnPlayMaskAsync(request, settings);
                 await ticket.ProcessMask();
 
-                if (request.OverlayContent != null && !cancellationToken.IsCancellationRequested && request.OverlayContent.Duration > TimeSpan.Zero)
+                if (hasOverlay && !cancellationToken.IsCancellationRequested)
                 {
                     await handler.OnPlayOverlayAsync(request, settings);
                     await ticket.ProcessOverlay();
                 }
+            }
+            else if (hasOverlay && !cancellationToken.IsCancellationRequested)
+            {
+                await handler.OnPlayOverlayAsync(request, settings);
+                await ticket.ProcessOverlay();
             }
         }
         catch (OperationCanceledException)

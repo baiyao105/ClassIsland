@@ -33,6 +33,7 @@ public class NotificationRequest : ObservableRecipient
         (NotificationState.Paused, NotificationState.Interrupted),
         (NotificationState.None, NotificationState.Cancelled),
         (NotificationState.Interrupted, NotificationState.Queued), // 移交
+        (NotificationState.Interrupted, NotificationState.Cancelled), // 中断后取消
     ];
 
     /// <summary>
@@ -174,7 +175,8 @@ public class NotificationRequest : ObservableRecipient
                 if (_state == value) return;
                 if (!IsValidStateTransition(_state, value))
                 {
-                    // Logger.LogWarning($"无效的状态转换: {_state} -> {value}");
+                    System.Diagnostics.Debug.WriteLine(
+                        $"[NotificationRequest] 非标准状态转换 {_state} -> {value}");
                     if (value != NotificationState.Cancelled)
                         return;
                 }
@@ -200,6 +202,8 @@ public class NotificationRequest : ObservableRecipient
         get => _leftProgress;
         internal set
         {
+            if (double.IsNaN(value) || double.IsInfinity(value))
+                value = 0.0;
             if (value.Equals(_leftProgress)) return;
             _leftProgress = value;
             OnPropertyChanged();
@@ -262,6 +266,8 @@ public class NotificationRequest : ObservableRecipient
     /// </summary>
     internal void ResetCancellationTokensForTransfer()
     {
+        var oldCancelSource = _cancellationTokenSource;
+        var oldCompletedSource = _completedTokenSource;
         _cancellationTokenSource = new CancellationTokenSource();
         _cancellationTokenSource.Token.Register(() =>
         {
@@ -272,6 +278,8 @@ public class NotificationRequest : ObservableRecipient
         {
             Completed?.Invoke(this, EventArgs.Empty);
         });
+        try { oldCancelSource.Dispose(); } catch (ObjectDisposedException) { }
+        try { oldCompletedSource.Dispose(); } catch (ObjectDisposedException) { }
     }
 
     /// <summary>

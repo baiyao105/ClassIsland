@@ -60,7 +60,8 @@ public class NotificationWorkerService : INotificationWorkerService
         }
         foreach (var token in tokens)
         {
-            token.Cancel();
+            try { token.Cancel(); } catch (ObjectDisposedException) { }
+            try { token.Dispose(); } catch (ObjectDisposedException) { }
         }
         SpeechService.ClearSpeechQueue();
     }
@@ -343,6 +344,7 @@ public class NotificationWorkerService : INotificationWorkerService
                 {
                     _activeAudioTokens.Remove(audioCancellationTokenSource);
                 }
+                try { audioCancellationTokenSource.Dispose(); } catch (ObjectDisposedException) { }
             }
             Logger.LogTrace("[{id}] END session, isMask={isMask}, playedTime={playedTime}", id, isMask, session.SessionPlayedTime);
             lock (_playingRequestsLock)

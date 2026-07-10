@@ -22,7 +22,7 @@ public interface INotificationHostService : IHostedService, INotifyPropertyChang
     
     internal NotificationRequest? CurrentRequest { get; set; }
     
-    internal NotificationRequest GetRequest();
+    internal NotificationRequest? GetRequest();
 
     /// <summary>
     /// 注册提醒服务。

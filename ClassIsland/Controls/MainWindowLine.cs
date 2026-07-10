@@ -323,8 +323,6 @@ public class MainWindowLine : ContentControl, INotificationConsumer, INotificati
 
     private bool _isLoadCompleted = false;
 
-    private bool _isTemplateApplied = false;
-
     private MainWindow? _mainWindow;
 
     public MainWindow MainWindow => _mainWindow ??= this.GetVisualRoot() as MainWindow ??
@@ -532,7 +530,7 @@ public class MainWindowLine : ContentControl, INotificationConsumer, INotificati
             Settings.PropertyChanged -= MySettingsOnPropertyChanged;
         }
         NotificationPlaybackService.CancelAll(this);
-        _isLoadCompleted = true;
+        _isLoadCompleted = false;
     }
 
     private void PreProcessNotificationContent(NotificationContent content)
@@ -697,7 +695,6 @@ public class MainWindowLine : ContentControl, INotificationConsumer, INotificati
         }
 
         Logger.LogTrace("GridWrapper Unloaded");
-        _isTemplateApplied = false;
     }
 
     private async void WrapperOnSizeChanged(object? sender, SizeChangedEventArgs e)

@@ -90,6 +90,11 @@ public class NotificationGroup
         }
     }
 
+    internal void ResetCancellationFlag()
+    {
+        Interlocked.Exchange(ref _groupCancelled, 0);
+    }
+
     /// <summary>
     /// 取消传播。
     /// </summary>
