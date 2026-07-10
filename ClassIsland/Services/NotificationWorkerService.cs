@@ -33,6 +33,13 @@ using NotificationRequest = ClassIsland.Core.Models.Notification.NotificationReq
 
 namespace ClassIsland.Services;
 
+/// <summary>
+/// 解析结果(调试)
+/// </summary>
+/// <param name="Settings">通知设置(解析结果)</param>
+/// <param name="Source">来源: Request, Channel, Provider, Global</param>
+public record ResolvedSettings(INotificationSettings Settings, string Source);
+
 public class NotificationWorkerService : INotificationWorkerService
 {
     
@@ -41,10 +48,11 @@ public class NotificationWorkerService : INotificationWorkerService
     private SettingsService SettingsService { get; }
     private IExactTimeService ExactTimeService { get; }
     private ILessonsService LessonsService { get; }
+    private INotificationBus Bus { get; }
     private ILogger<NotificationWorkerService> Logger { get; }
 
     private readonly object _playingRequestsLock = new();
-    private List<(NotificationRequest request, bool overlay)> PlayingRequests { get; } = [];
+    private List<(NotificationRequest request, NotificationContentSnapshot? snapshot, bool isOverlay)> PlayingRequests { get; } = [];
     private readonly HashSet<CancellationTokenSource> _activeAudioTokens = new();
 
     /// <summary>
@@ -70,6 +78,7 @@ public class NotificationWorkerService : INotificationWorkerService
         SettingsService settingsService,
         IExactTimeService exactTimeService,
         ILessonsService lessonsService,
+        INotificationBus bus,
         ILogger<NotificationWorkerService> logger)
     {
         SpeechService = speechService;
@@ -77,6 +86,7 @@ public class NotificationWorkerService : INotificationWorkerService
         SettingsService = settingsService;
         ExactTimeService = exactTimeService;
         LessonsService = lessonsService;
+        Bus = bus;
         Logger = logger;
         
         LessonsService.PostMainTimerTicked += LessonsServiceOnPostMainTimerTicked;
@@ -84,44 +94,40 @@ public class NotificationWorkerService : INotificationWorkerService
 
     private void TransitionState(NotificationRequest request, NotificationState newState)
     {
-        IAppHost.GetService<INotificationHostService>().TransitionRequestState(request, newState);
+        var oldState = request.Lifecycle.State;
+        Bus.RaiseStateChanged(request, oldState, newState);
     }
 
     private void LessonsServiceOnPostMainTimerTicked(object? sender, EventArgs e)
     {
         var now = ExactTimeService.GetCurrentLocalDateTime();
-        List<(NotificationRequest request, bool overlay)> requests;
+        List<(NotificationRequest request, NotificationContentSnapshot? snapshot, bool isOverlay)> requests;
         lock (_playingRequestsLock)
         {
             requests = [.. PlayingRequests];
         }
 
-        foreach (var (request, overlay) in requests)
+        foreach (var (request, snapshot, isOverlay) in requests)
         {
-            if (!overlay || request.OverlayContent is not { } content)
+            if (!isOverlay || snapshot is not { } snap)
             {
                 continue;
             }
 
             var session = request.OverlaySession;
-            if (request.State == NotificationState.Paused)
+            if (request.Lifecycle.State == NotificationState.Paused)
                 continue;
             
-            request.LeftProgress = session.IsExplicitEndTime
-                ? 1 - (now - session.SessionStartTime) / content.Duration
-                : 1 - (session.SessionPlayedTime + session.TimingStopwatch.Elapsed) / content.Duration;
+            request.Lifecycle.LeftProgress = session.IsExplicitEndTime
+                ? 1 - (now - session.SessionStartTime) / snap.Duration
+                : 1 - (session.SessionPlayedTime + session.TimingStopwatch.Elapsed) / snap.Duration;
         }
     }
     
-    private TimeSpan SetupNotificationSessionTiming(Guid sid, NotificationContent content, NotificationPlayingSessionInfo session)
+    private TimeSpan SetupNotificationSessionTiming(Guid sid, NotificationContentSnapshot snapshot, NotificationPlayingSessionInfo session)
     {
         var now = ExactTimeService.GetCurrentLocalDateTime();
-        var explicitEndTime = content.EndTime != null;
-        if (!content.IsTimingInit && explicitEndTime)  // 如果目标结束时间不为空，那么就计算持续时间
-        {
-            var rawTime = content.EndTime!.Value - now;
-            content.Duration = rawTime > TimeSpan.Zero ? rawTime : TimeSpan.Zero;
-        }
+        var explicitEndTime = snapshot.EndTime != null;
 
         if (session.SessionStartTime == DateTime.MinValue)
         {
@@ -131,11 +137,10 @@ public class NotificationWorkerService : INotificationWorkerService
         session.IsExplicitEndTime = explicitEndTime;
         session.CurrentTicketStartTime = now;
         session.TimingStopwatch.Restart();
-        content.IsTimingInit = true;
 
         var duration = explicitEndTime
-            ? content.EndTime!.Value - now
-            : content.Duration - session.SessionPlayedTime;
+            ? snapshot.EndTime!.Value - now
+            : snapshot.Duration - session.SessionPlayedTime;
         Logger.LogTrace("[{sid}] 计算当前票据会话持续时间，now={now}, playedTime={playedTime}, duration={duration}", sid, now, session.SessionPlayedTime, duration);
         return duration > TimeSpan.Zero ? duration : TimeSpan.Zero;
     }
@@ -143,22 +148,31 @@ public class NotificationWorkerService : INotificationWorkerService
     public NotificationPlayingTicket CreateTicket(NotificationRequest request)
     {
         var cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(
-            request.CancellationToken);
-        var settings = GetEffectiveSettings(request);
+            request.Lifecycle.CancellationToken);
+        var resolved = GetEffectiveSettings(request);
+        var settings = resolved.Settings;
+        Logger.LogDebug("票据创建: 来源={source}, Channel={channelId}", resolved.Source, request.ChannelId);
+        var now = ExactTimeService.GetCurrentLocalDateTime();
+        var maskSnapshot = NotificationContentSnapshot.From(request.MaskContent, now);
+        var overlaySnapshot = request.OverlayContent != null
+            ? NotificationContentSnapshot.From(request.OverlayContent, now)
+            : null;
 
         var cancellationCompletedSource = new TaskCompletionSource();
         cancellationTokenSource.Token.Register(() =>
         {
-            if (request.State != NotificationState.Playing)
+            if (request.Lifecycle.State != NotificationState.Playing)
             {
                 cancellationCompletedSource.TrySetResult();
             }
         });
         var ticket = new NotificationPlayingTicket()
         {
-            ProcessMask = CreateMaskProcessor(request, cancellationTokenSource.Token, settings, cancellationCompletedSource),
-            ProcessOverlay = CreateOverlayProcessor(request, cancellationTokenSource.Token, settings, cancellationCompletedSource),
+            ProcessMask = CreateMaskProcessor(request, maskSnapshot, cancellationTokenSource.Token, settings, cancellationCompletedSource),
+            ProcessOverlay = CreateOverlayProcessor(request, overlaySnapshot, cancellationTokenSource.Token, settings, cancellationCompletedSource),
             Request = request,
+            MaskSnapshot = maskSnapshot,
+            OverlaySnapshot = overlaySnapshot,
             Settings = settings,
             CancellationTokenSource = cancellationTokenSource,
             CancellationCompletedCompletionSource = cancellationCompletedSource
@@ -166,41 +180,44 @@ public class NotificationWorkerService : INotificationWorkerService
         return ticket;
     }
 
-    private INotificationSettings GetEffectiveSettings(NotificationRequest request)
+    private ResolvedSettings GetEffectiveSettings(NotificationRequest request)
     {
-        INotificationSettings settings = SettingsService.Settings;
-        var candidates = new[]
+        // 优先级: 请求级 > 渠道级 > 提供方级 > 全局
+        if (request.RequestNotificationSettings is { IsSettingsEnabled: true } req)
         {
-            request.ChannelSettings,
-            request.ProviderSettings,
-            request.RequestNotificationSettings
-        };
-
-        foreach (var candidate in candidates.OfType<NotificationSettings>().Where(i => i.IsSettingsEnabled))
-        {
-            settings = candidate;
-            break;
+            Logger.LogTrace("来源: 请求级 (Channel={channelId})", request.ChannelId);
+            return new ResolvedSettings(req, "Request");
         }
-
-        return settings;
+        if (request.ChannelSettings is { IsSettingsEnabled: true } ch)
+        {
+            Logger.LogTrace("来源: 渠道级 (Channel={channelId})", request.ChannelId);
+            return new ResolvedSettings(ch, "Channel");
+        }
+        if (request.ProviderSettings is { IsSettingsEnabled: true } prov)
+        {
+            Logger.LogTrace("来源: 提供方级 (Provider={providerId})", request.NotificationSourceGuid);
+            return new ResolvedSettings(prov, "Provider");
+        }
+        Logger.LogTrace("来源: 默认");
+        return new ResolvedSettings(SettingsService.Settings, "Global");
     }
 
-    private Func<Task> CreateMaskProcessor(NotificationRequest request, CancellationToken cancellationToken, INotificationSettings settings, TaskCompletionSource cancellationCompletedSource) => async () =>
+    private Func<Task> CreateMaskProcessor(NotificationRequest request, NotificationContentSnapshot snapshot, CancellationToken cancellationToken, INotificationSettings settings, TaskCompletionSource cancellationCompletedSource) => async () =>
     {
-        await ProcessNotificationSessionCore(request, request.MaskContent, request.MaskSession, true, cancellationToken, settings, cancellationCompletedSource);
+        await ProcessNotificationSessionCore(request, snapshot, request.MaskSession, true, cancellationToken, settings, cancellationCompletedSource);
     };
     
-    private Func<Task> CreateOverlayProcessor(NotificationRequest request, CancellationToken cancellationToken, INotificationSettings settings, TaskCompletionSource cancellationCompletedSource) => async () =>
+    private Func<Task> CreateOverlayProcessor(NotificationRequest request, NotificationContentSnapshot? snapshot, CancellationToken cancellationToken, INotificationSettings settings, TaskCompletionSource cancellationCompletedSource) => async () =>
     {
-        if (request.OverlayContent == null)
+        if (snapshot == null)
         {
             return;
         }
-        await ProcessNotificationSessionCore(request, request.OverlayContent, request.OverlaySession, false, cancellationToken, settings, cancellationCompletedSource);
+        await ProcessNotificationSessionCore(request, snapshot, request.OverlaySession, false, cancellationToken, settings, cancellationCompletedSource);
     };
 
     private async Task ProcessNotificationSessionCore(NotificationRequest request,
-        NotificationContent content,
+        NotificationContentSnapshot snapshot,
         NotificationPlayingSessionInfo session,
         bool isMask,
         CancellationToken cancellationToken, 
@@ -208,9 +225,9 @@ public class NotificationWorkerService : INotificationWorkerService
         TaskCompletionSource cancellationCompletedSource)
     {
         var id = Guid.NewGuid();
-        var duration = SetupNotificationSessionTiming(id, content, session);
+        var duration = SetupNotificationSessionTiming(id, snapshot, session);
         TransitionState(request, NotificationState.Playing);
-        var tuple = (request, !isMask);
+        var tuple = (request, isMask ? null : snapshot, !isMask);
         lock (_playingRequestsLock)
         {
             PlayingRequests.Add(tuple);
@@ -220,10 +237,10 @@ public class NotificationWorkerService : INotificationWorkerService
         Logger.LogTrace("[{id}] Start session, isMask={isMask}, duration={duration}", id, isMask, duration);
         try
         {
-            var isSpeechEnabled = settings.IsSpeechEnabled && content.IsSpeechEnabled && SettingsService.Settings.AllowNotificationSpeech;
+            var isSpeechEnabled = settings.IsSpeechEnabled && snapshot.IsSpeechEnabled && SettingsService.Settings.AllowNotificationSpeech;
             if (!session.HasSoundsPlayed && isSpeechEnabled)
             {
-                try { SpeechService.EnqueueSpeechQueue(content.SpeechContent); } catch (Exception ex) { Logger.LogWarning(ex, "语音播报失败"); }
+                try { SpeechService.EnqueueSpeechQueue(snapshot.SpeechContent); } catch (Exception ex) { Logger.LogWarning(ex, "语音播报失败"); }
             }
             
             if (!session.HasSoundsPlayed && isMask && settings.IsNotificationSoundEnabled && SettingsService.Settings.AllowNotificationSound)
@@ -250,7 +267,7 @@ public class NotificationWorkerService : INotificationWorkerService
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var now = ExactTimeService.GetCurrentLocalDateTime();
-                if (request.State == NotificationState.Paused)
+                if (request.Lifecycle.State == NotificationState.Paused)
                 {
                     if (session.TimingStopwatch.IsRunning)
                     {
@@ -269,8 +286,8 @@ public class NotificationWorkerService : INotificationWorkerService
                 }
 
                 var remaining = session.IsExplicitEndTime
-                    ? content.EndTime!.Value - now
-                    : content.Duration - session.SessionPlayedTime - session.TimingStopwatch.Elapsed;
+                    ? snapshot.EndTime!.Value - now
+                    : snapshot.Duration - session.SessionPlayedTime - session.TimingStopwatch.Elapsed;
                 if (remaining <= TimeSpan.Zero)
                 {
                     break;
@@ -285,7 +302,7 @@ public class NotificationWorkerService : INotificationWorkerService
                 {
                     try { SpeechService.ClearSpeechQueue(); } catch (ObjectDisposedException) { }
                 }
-                await request.CompletedTokenSource.CancelAsync();
+                request.Lifecycle.MarkCompleted();
             }
 
             session.IsCompleted = true;
@@ -293,10 +310,10 @@ public class NotificationWorkerService : INotificationWorkerService
         catch (OperationCanceledException)
         {
             Logger.LogInformation("提醒请求 {request} 取消播放", request.GetHashCode());
-            if (request.CancellationToken.IsCancellationRequested)
+            if (request.Lifecycle.CancellationToken.IsCancellationRequested)
             {
                 TransitionState(request, NotificationState.Cancelled);
-                request.CompletedTokenSource.Cancel();
+                request.Lifecycle.MarkCompleted();
             }
             else
             {
@@ -322,13 +339,11 @@ public class NotificationWorkerService : INotificationWorkerService
             // Interrupted: 不截断
             // Cancelled: 直接截断
             // 其他: 看设置决定
-            if (request.State == NotificationState.Interrupted)
+            if (request.Lifecycle.State == NotificationState.Interrupted)
             {
-                // Interrupted
             }
-            else if (request.State == NotificationState.Cancelled)
+            else if (request.Lifecycle.State == NotificationState.Cancelled)
             {
-                // Cancelled
                 try { audioCancellationTokenSource?.Cancel(); } catch (ObjectDisposedException) { }
             }
             else

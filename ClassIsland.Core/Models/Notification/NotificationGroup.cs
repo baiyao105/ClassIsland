@@ -7,39 +7,40 @@ using ClassIsland.Core.Enums.Notification;
 namespace ClassIsland.Core.Models.Notification;
 
 /// <summary>
-/// 将链式提醒请求作为单元管理。
+/// 链式提醒请求管理单元
 /// </summary>
 public class NotificationGroup
 {
     private int _groupCancelled;
 
     /// <summary>
-    /// 组内所有提醒请求。
+    /// 组内所有提醒请求
     /// </summary>
     public List<NotificationRequest> Requests { get; }
 
     /// <summary>
-    /// 组级别取消令牌源。取消此令牌将触发组内所有请求取消。
+    /// 组别取消令牌源
     /// </summary>
     public CancellationTokenSource GroupCancellationTokenSource { get; }
 
     /// <summary>
-    /// 组级别完成令牌源。
+    /// 组级完成令牌源
     /// </summary>
     public CancellationTokenSource GroupCompletedTokenSource { get; }
 
     /// <summary>
-    /// 入队时间。由 QueueNotificationGroup 设置。
+    /// 入队时间
     /// </summary>
     public DateTime EnqueuedAt { get; internal set; } = DateTime.MinValue;
 
     /// <summary>
-    /// 有效分配时间。超过此时间未被分配则丢弃。为 null 表示无时效限制。
+    /// 有效分配时间
+    /// 超过此时间未被分配则丢弃。为 null 表示无时效限制
     /// </summary>
     public DateTime? ValidUntil { get; internal set; }
 
     /// <summary>
-    /// 初始化一个多请求（链式）组。
+    /// 初始化一个多请求(链式通知)组
     /// </summary>
     public NotificationGroup(
         List<NotificationRequest> requests,
@@ -52,13 +53,13 @@ public class NotificationGroup
     }
 
     /// <summary>
-    /// 初始化一个单请求组。
+    /// 初始化一个单请求组
     /// </summary>
     public NotificationGroup(NotificationRequest request)
     {
         Requests = [request];
         GroupCancellationTokenSource = new CancellationTokenSource();
-        GroupCompletedTokenSource = request.CompletedTokenSource;
+        GroupCompletedTokenSource = request.Lifecycle.CompletedTokenSource;
     }
 
     /// <summary>
@@ -67,18 +68,18 @@ public class NotificationGroup
     public NotificationRequest Head => Requests[0];
 
     /// <summary>
-    /// 收集组内所有活跃（未完成、未取消）的请求。
+    /// 收集组内所有活跃(未完成, 未取消)的请求
     /// </summary>
     public List<NotificationRequest> CollectActiveRequests()
     {
         return Requests
-            .Where(r => r.State != NotificationState.Completed &&
-                        r.State != NotificationState.Cancelled)
+            .Where(r => r.Lifecycle.State != NotificationState.Completed &&
+                        r.Lifecycle.State != NotificationState.Cancelled)
             .ToList();
     }
 
     /// <summary>
-    /// 取消组内所有请求。
+    /// 取消组内所有请求
     /// </summary>
     public void CancelAll()
     {
@@ -86,7 +87,7 @@ public class NotificationGroup
             return;
         foreach (var r in Requests)
         {
-            try { r.CancellationTokenSource.Cancel(); } catch (ObjectDisposedException) { }
+            try { r.Lifecycle.CancellationTokenSource.Cancel(); } catch (ObjectDisposedException) { }
         }
     }
 
@@ -96,13 +97,13 @@ public class NotificationGroup
     }
 
     /// <summary>
-    /// 取消传播。
+    /// 取消传播
     /// </summary>
     public void RegisterGroupCancellationPropagation()
     {
         foreach (var request in Requests)
         {
-            request.CancellationTokenSource.Token.Register(() =>
+            request.Lifecycle.CancellationTokenSource.Token.Register(() =>
             {
                 CancelAll();
             });

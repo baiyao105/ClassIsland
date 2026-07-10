@@ -1,7 +1,7 @@
 namespace ClassIsland.Core.Enums.Notification;
 
 /// <summary>
-/// 代表一个提醒的播放状态。
+/// 提醒的播放状态
 /// </summary>
 public enum NotificationState
 {
@@ -22,15 +22,15 @@ public enum NotificationState
     /// </summary>
     Paused,
     /// <summary>
-    /// 已取消（最终状态）
+    /// 已取消 (最终状态)
     /// </summary>
     Cancelled,
     /// <summary>
-    /// 已正常完成（最终状态）
+    /// 已正常完成 (最终状态)
     /// </summary>
     Completed,
     /// <summary>
-    /// 中断（等待移交到其他消费者继续播放）
+    /// 中断 (等待移交到其他消费者继续播放)
     /// </summary>
     Interrupted
 }

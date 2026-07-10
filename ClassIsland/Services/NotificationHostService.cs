@@ -31,13 +31,14 @@ namespace ClassIsland.Services;
 /// <summary>
 /// 提醒主机服务。
 /// </summary>
-public class NotificationHostService(SettingsService settingsService, ILogger<NotificationHostService> logger, INotificationWorkerService notificationWorkerService, IExactTimeService exactTimeService)
+public class NotificationHostService(SettingsService settingsService, ILogger<NotificationHostService> logger, INotificationWorkerService notificationWorkerService, IExactTimeService exactTimeService, INotificationBus notificationBus)
     : IHostedService, INotifyPropertyChanged, INotificationHostService
 {
     private SettingsService SettingsService { get; } = settingsService;
     private ILogger<NotificationHostService> Logger { get; } = logger;
     private INotificationWorkerService NotificationWorkerService { get; } = notificationWorkerService;
     private IExactTimeService ExactTimeService { get; } = exactTimeService;
+    private INotificationBus Bus { get; } = notificationBus;
     private Settings Settings => SettingsService.Settings;
 
     public PriorityQueue<NotificationGroup, NotificationPriority> RequestQueue { get; } = new();
@@ -148,7 +149,7 @@ public class NotificationHostService(SettingsService settingsService, ILogger<No
     {
         lock (_syncLock)
         {
-            request.State = newState;
+            request.Lifecycle.State = newState;
             switch (newState)
             {
                 case NotificationState.Completed:
@@ -197,13 +198,13 @@ public class NotificationHostService(SettingsService settingsService, ILogger<No
     {
         if (!Settings.IsNotificationEnabled)
         {
-            request.CompletedTokenSource.Cancel();
+            request.Lifecycle.MarkCompleted();
             return;
         }
         if (!isPlayed)
         {
             SetupNotificationRequest(request, providerGuid, channelGuid);
-            request.CompletedToken.Register(() => FinishNotificationPlaying(request));
+            request.Lifecycle.CompletedToken.Register(() => FinishNotificationPlaying(request));
         }
         var group = new NotificationGroup(request);
         request.Group = group;
@@ -247,7 +248,7 @@ public class NotificationHostService(SettingsService settingsService, ILogger<No
     public async Task ShowNotificationAsync(NotificationRequest request, Guid providerGuid, Guid channelGuid)
     {
         var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        request.CompletedToken.Register(() => tcs.TrySetResult());
+        request.Lifecycle.CompletedToken.Register(() => tcs.TrySetResult());
         await Dispatcher.UIThread.InvokeIfNeededAsync(() =>
         {
             ShowNotification(request, providerGuid, channelGuid, true, false);
@@ -265,18 +266,18 @@ public class NotificationHostService(SettingsService settingsService, ILogger<No
         {
             foreach (var request in requests)
             {
-                request.CompletedTokenSource.Cancel();
+                request.Lifecycle.MarkCompleted();
             }
             return;
         }
 
-        var rootCancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(requests.Select(x => x.CancellationTokenSource.Token).ToArray());
-        var rootCompletedTokenSource = CancellationTokenSource.CreateLinkedTokenSource(requests.Select(x => x.CompletedTokenSource.Token).ToArray());
+        var rootCancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource([.. requests.Select(x => x.Lifecycle.CancellationTokenSource.Token)]);
+        var rootCompletedTokenSource = CancellationTokenSource.CreateLinkedTokenSource([.. requests.Select(x => x.Lifecycle.CompletedTokenSource.Token)]);
         rootCancellationTokenSource.Token.Register(() =>
         {
-            foreach (var request in requests.Where(x => !x.CancellationToken.IsCancellationRequested))
+            foreach (var request in requests.Where(x => !x.Lifecycle.CancellationToken.IsCancellationRequested))
             {
-                request.CancellationTokenSource.Cancel();
+                request.Lifecycle.Cancel();
             }
         });
         rootCompletedTokenSource.Token.Register(() =>
@@ -300,7 +301,7 @@ public class NotificationHostService(SettingsService settingsService, ILogger<No
             }
             SetupNotificationRequest(request, providerGuid, channelGuid);
             prevRequest = request;
-            request.CompletedToken.Register(() => FinishNotificationPlaying(request));
+            request.Lifecycle.CompletedToken.Register(() => FinishNotificationPlaying(request));
         }
 
         if (PushNotificationGroups([group]))
@@ -320,7 +321,7 @@ public class NotificationHostService(SettingsService settingsService, ILogger<No
         }
 
         var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        requests.Last().CompletedToken.Register(() => tcs.TrySetResult());
+        requests.Last().Lifecycle.CompletedToken.Register(() => tcs.TrySetResult());
         await Dispatcher.UIThread.InvokeIfNeededAsync(() =>
         {
             ShowChainedNotifications(requests, providerGuid, channelGuid);
@@ -343,7 +344,38 @@ public class NotificationHostService(SettingsService settingsService, ILogger<No
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
+        Bus.StateChanged += OnBusStateChanged;
+        Bus.PullRequested += OnBusPullRequested;
+        Bus.DispatchRequested += OnBusDispatchRequested;
+        Bus.ConsumerRemoved += OnBusConsumerRemoved;
         return Task.CompletedTask;
+    }
+
+    private void OnBusStateChanged(NotificationRequest request, NotificationState from, NotificationState to)
+    {
+        TransitionRequestState(request, to);
+    }
+
+    private IList<NotificationPlayingTicket> OnBusPullRequested(INotificationConsumer consumer)
+    {
+        return PullNotificationRequests(consumer);
+    }
+
+    private void OnBusDispatchRequested()
+    {
+        PopGroupsToConsumers();
+    }
+
+    private void OnBusConsumerRemoved(INotificationConsumer consumer)
+    {
+        lock (_syncLock)
+        {
+            var registerInfo = RegisteredConsumers.FirstOrDefault(x => x.Consumer == consumer);
+            if (registerInfo != null)
+            {
+                RegisteredConsumers.Remove(registerInfo);
+            }
+        }
     }
 
     public Task StopAsync(CancellationToken cancellationToken)
@@ -352,6 +384,10 @@ public class NotificationHostService(SettingsService settingsService, ILogger<No
         {
             _isStopping = true;
         }
+        Bus.StateChanged -= OnBusStateChanged;
+        Bus.PullRequested -= OnBusPullRequested;
+        Bus.DispatchRequested -= OnBusDispatchRequested;
+        Bus.ConsumerRemoved -= OnBusConsumerRemoved;
         CancelAllNotifications();
         return Task.CompletedTask;
     }
@@ -404,18 +440,18 @@ public class NotificationHostService(SettingsService settingsService, ILogger<No
             PlayingTickets.Clear();
             UpdateNotificationPlayingState();
         }
-        IAppHost.GetService<INotificationWorkerService>().CancelAllAudio();
+        NotificationWorkerService.CancelAllAudio();
         foreach (var group in groups)
         {
             foreach (var request in group.Requests)
             {
-                request.CompletedTokenSource.Cancel();
+                request.Lifecycle.MarkCompleted();
             }
         }
         foreach (var ticket in playingTickets)
         {
-            ticket.Request.CancellationTokenSource.Cancel();
-            ticket.Request.CompletedTokenSource.Cancel();
+            ticket.Request.Lifecycle.Cancel();
+            ticket.Request.Lifecycle.MarkCompleted();
         }
     }
 
@@ -439,7 +475,7 @@ public class NotificationHostService(SettingsService settingsService, ILogger<No
         {
             foreach (var request in group.Requests)
             {
-                try { request.CompletedTokenSource.Cancel(); } catch (ObjectDisposedException) { }
+                try { request.Lifecycle.MarkCompleted(); } catch (ObjectDisposedException) { }
             }
         }
     }
@@ -524,7 +560,7 @@ public class NotificationHostService(SettingsService settingsService, ILogger<No
                     Logger.LogWarning("通知组已过期, 丢弃: {}", currentGroup.Head);
                     foreach (var r in currentGroup.Requests)
                     {
-                        try { r.CancellationTokenSource.Cancel(); } catch (ObjectDisposedException) { }
+                        try { r.Lifecycle.Cancel(); } catch (ObjectDisposedException) { }
                     }
                     continue;
                 }
@@ -585,7 +621,7 @@ public class NotificationHostService(SettingsService settingsService, ILogger<No
                     Logger.LogWarning("通知组已过期, 丢弃: {}", currentGroup.Head);
                     foreach (var r in currentGroup.Requests)
                     {
-                        try { r.CancellationTokenSource.Cancel(); } catch (ObjectDisposedException) { }
+                        try { r.Lifecycle.Cancel(); } catch (ObjectDisposedException) { }
                     }
                     continue;
                 }
@@ -661,17 +697,7 @@ public class NotificationHostService(SettingsService settingsService, ILogger<No
 
     public void UnregisterNotificationConsumer(INotificationConsumer consumer)
     {
-        lock (_syncLock)
-        {
-            var registerInfo = RegisteredConsumers.FirstOrDefault(x => x.Consumer == consumer);
-            if (registerInfo == null)
-            {
-                return;
-            }
-
-            RegisteredConsumers.Remove(registerInfo);
-        }
-        IAppHost.GetService<INotificationPlaybackService>().RemoveConsumer(consumer);
+        Bus.RaiseConsumerRemoved(consumer); // 发事件
     }
 
     public bool IsNotificationsPlaying
@@ -703,7 +729,7 @@ public class NotificationHostService(SettingsService settingsService, ILogger<No
 
             _ = HandleTicketCancellationAsync(request, ticket);
         });
-        request.CompletedToken.Register(() =>
+        request.Lifecycle.CompletedToken.Register(() =>
         {
             lock (_syncLock)
             {
@@ -728,13 +754,13 @@ public class NotificationHostService(SettingsService settingsService, ILogger<No
                 Logger.LogTrace(ex, "等待取消完成时发生异常");
             }
 
-            // DEBT: 因为时态问题打的补丁.
-            if (request.State == NotificationState.Playing)
+            // 因为时态问题打的补丁.
+            if (request.Lifecycle.State == NotificationState.Playing)
             {
                 var stateChangedSource = new TaskCompletionSource();
                 PropertyChangedEventHandler handler = (_, args) =>
                 {
-                    if (args.PropertyName == nameof(NotificationRequest.State))
+                    if (args.PropertyName == nameof(NotificationLifecycle.State))
                         stateChangedSource.TrySetResult();
                 };
                 try
@@ -748,10 +774,10 @@ public class NotificationHostService(SettingsService settingsService, ILogger<No
                 {
                     request.PropertyChanged -= handler;
                 }
-                Logger.LogTrace("票据State变更为 {}", request.State);
+                Logger.LogTrace("票据state变更为 {}", request.Lifecycle.State);
             }
 
-            if (request.State != NotificationState.Interrupted)
+            if (request.Lifecycle.State != NotificationState.Interrupted)
             {
                 return;
             }
@@ -761,13 +787,13 @@ public class NotificationHostService(SettingsService settingsService, ILogger<No
                 Logger.LogWarning("提醒请求 {} 没有关联的组，无法重新入队", request);
                 return;
             }
-            if (request.State == NotificationState.Interrupted)
+            if (request.Lifecycle.State == NotificationState.Interrupted)
             {
                 foreach (var r in group.Requests)
                 {
                     if (r != request)
                     {
-                        try { r.CancellationTokenSource.Cancel(); } catch (ObjectDisposedException) { }
+                        try { r.Lifecycle.Cancel(); } catch (ObjectDisposedException) { }
                     }
                 }
             }
@@ -775,11 +801,11 @@ public class NotificationHostService(SettingsService settingsService, ILogger<No
             var activeRequests = group.CollectActiveRequests();
             if (activeRequests.Count > 0)
             {
-                if (request.State == NotificationState.Interrupted)
+                if (request.Lifecycle.State == NotificationState.Interrupted)
                 {
                     foreach (var r in activeRequests)
                     {
-                        r.ResetCancellationTokensForTransfer();
+                        r.Lifecycle.ResetCancellationTokensForTransfer();
                     }
                 }
                 foreach (var r in activeRequests)

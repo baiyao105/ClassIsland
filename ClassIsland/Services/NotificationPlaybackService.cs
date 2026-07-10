@@ -9,13 +9,29 @@ using Microsoft.Extensions.Logging;
 
 namespace ClassIsland.Services;
 
-public class NotificationPlaybackService(ILogger<NotificationPlaybackService> logger, INotificationHostService notificationHostService) : INotificationPlaybackService
+/// <summary>
+/// 提醒播放服务
+/// 协调提醒播放流程
+/// </summary>
+public class NotificationPlaybackService : INotificationPlaybackService
 {
-    private ILogger<NotificationPlaybackService> Logger { get; } = logger;
-    private INotificationHostService NotificationHostService { get; } = notificationHostService;
+    private ILogger<NotificationPlaybackService> Logger { get; }
+    private INotificationBus Bus { get; }
 
     private readonly Dictionary<INotificationConsumer, PlaybackSession> _sessions = new();
     private readonly object _syncLock = new();
+
+    public NotificationPlaybackService(ILogger<NotificationPlaybackService> logger, INotificationBus bus)
+    {
+        Logger = logger;
+        Bus = bus;
+        Bus.ConsumerRemoved += OnConsumerRemoved;
+    }
+
+    private void OnConsumerRemoved(INotificationConsumer consumer)
+    {
+        RemoveConsumer(consumer);
+    }
 
     private class PlaybackSession
     {
@@ -110,7 +126,7 @@ public class NotificationPlaybackService(ILogger<NotificationPlaybackService> lo
                 }
                 if (needPull)
                 {
-                    var pulledTickets = NotificationHostService.PullNotificationRequests(consumer);
+                    var pulledTickets = Bus.RaisePullRequested(consumer);
                     if (pulledTickets.Count > 0)
                     {
                         lock (_syncLock)
@@ -130,7 +146,7 @@ public class NotificationPlaybackService(ILogger<NotificationPlaybackService> lo
                         var h = session.Handler;
                         _sessions.Remove(consumer);
                         h?.OnPlaybackCompleted();
-                        NotificationHostService.PopGroupsToConsumers();
+                        Bus.RaiseDispatchRequested();
                         return;
                     }
                     ticket = session.Queue.Dequeue();
@@ -152,7 +168,7 @@ public class NotificationPlaybackService(ILogger<NotificationPlaybackService> lo
                     {
                         session.PlayingTickets.Remove(ticket);
                     }
-                    NotificationHostService.PopGroupsToConsumers();
+                    Bus.RaiseDispatchRequested();
                 }
             }
         }
@@ -165,7 +181,7 @@ public class NotificationPlaybackService(ILogger<NotificationPlaybackService> lo
                 _sessions.Remove(consumer);
             }
             try { session.Handler?.OnPlaybackCompleted(); } catch { }
-            NotificationHostService.PopGroupsToConsumers();
+            Bus.RaiseDispatchRequested();
         }
     }
 
