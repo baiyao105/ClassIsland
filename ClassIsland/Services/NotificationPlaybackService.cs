@@ -72,9 +72,11 @@ public class NotificationPlaybackService : INotificationPlaybackService
         lock (_syncLock)
         {
             // 路由层用这个值判断消费者是否空闲。
-            return _sessions.TryGetValue(consumer, out var session)
-                ? session.Queue.Count + session.PlayingTickets.Count
-                : 0;
+            var hasSession = _sessions.TryGetValue(consumer, out var session);
+            var queueCount = hasSession ? session!.Queue.Count : 0;
+            var playingCount = hasSession ? session!.PlayingTickets.Count : 0;
+            var total = queueCount + playingCount;
+            return total;
         }
     }
 
@@ -152,7 +154,7 @@ public class NotificationPlaybackService : INotificationPlaybackService
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "提醒播放会话出现异常。");
+            Logger.LogError(ex, "提醒播放会话出现异常 (消费者 {ConsumerHash})", consumer.GetHashCode());
             lock (_syncLock)
             {
                 session.IsPlaying = false;

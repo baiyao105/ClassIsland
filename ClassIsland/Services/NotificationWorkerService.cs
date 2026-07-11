@@ -185,20 +185,16 @@ public class NotificationWorkerService : INotificationWorkerService
         // 优先级: 请求级 > 渠道级 > 提供方级 > 全局
         if (request.RequestNotificationSettings is { IsSettingsEnabled: true } req)
         {
-            Logger.LogTrace("来源: 请求级 (Channel={channelId})", request.ChannelId);
             return new ResolvedSettings(req, "Request");
         }
         if (request.ChannelSettings is { IsSettingsEnabled: true } ch)
         {
-            Logger.LogTrace("来源: 渠道级 (Channel={channelId})", request.ChannelId);
             return new ResolvedSettings(ch, "Channel");
         }
         if (request.ProviderSettings is { IsSettingsEnabled: true } prov)
         {
-            Logger.LogTrace("来源: 提供方级 (Provider={providerId})", request.NotificationSourceGuid);
             return new ResolvedSettings(prov, "Provider");
         }
-        Logger.LogTrace("来源: 默认");
         return new ResolvedSettings(SettingsService.Settings, "Global");
     }
 

@@ -60,7 +60,9 @@ public partial class App
         services.AddSingleton<UpdateService>();
         services.AddSingleton<ITaskBarIconService, TaskBarIconService>();
         // services.AddSingleton<WallpaperPickingService>();
-        services.AddSingleton<INotificationHostService, NotificationHostService>();
+        services.AddSingleton<NotificationHostService>();
+        services.AddSingleton<INotificationHostService>(sp => sp.GetRequiredService<NotificationHostService>());
+        services.AddSingleton<IHostedService>(sp => sp.GetRequiredService<NotificationHostService>());
         services.AddSingleton<INotificationWorkerService, NotificationWorkerService>();
         services.AddSingleton<INotificationPlaybackService, NotificationPlaybackService>();
         services.AddSingleton<INotificationBus, NotificationBus>();
