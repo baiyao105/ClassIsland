@@ -315,19 +315,18 @@ public class WeatherService : ObservableRecipient, IHostedService, IWeatherServi
                 else
                 {
                     Logger.LogError("无法通过CityId获取城市信息");
-                    result.IsSuccess = false;
                     result.ErrorMessage = "无法通过CityId获取城市信息";
+                    RulesetService.NotifyStatusChanged();
+                    return result;
                 }
             }
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "获取城市信息失败。");
-            if (result.ErrorMessage == null)
-            {
-                result.IsSuccess = false;
-                result.ErrorMessage = ex.Message;
-            }
+            result.ErrorMessage = ex.Message;
+            RulesetService.NotifyStatusChanged();
+            return result;
         }
 
         // 请求天气信息
