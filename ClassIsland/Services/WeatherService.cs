@@ -230,6 +230,12 @@ public class WeatherService : ObservableRecipient, IHostedService, IWeatherServi
 
     public async Task QueryWeatherAsync()
     {
+        await QueryWeatherWithResultAsync();
+    }
+
+    public async Task<WeatherQueryResult> QueryWeatherWithResultAsync()
+    {
+        var result = new WeatherQueryResult();
         if (!IsPosUpdated && Settings.AutoRefreshWeatherLocation)
         {
             IsPosUpdated = true;
@@ -256,6 +262,7 @@ public class WeatherService : ObservableRecipient, IHostedService, IWeatherServi
             {
                 var precisions = new[] { 4, 3, 2, 1, 0 };
                 bool found = false;
+                int usedPrecision = 4;
                 foreach (var precision in precisions)
                 {
                     var lon = Math.Round(Settings.WeatherLongitude, precision);
@@ -274,13 +281,21 @@ public class WeatherService : ObservableRecipient, IHostedService, IWeatherServi
                         Settings.CityId = cityInfo.LocationKey;
                         Settings.CityName = $"{cityInfo.Name} ({cityInfo.Affiliation})";
                         Logger.LogDebug("城市信息精度: {Precision}", precision);
+                        usedPrecision = precision;
                         found = true;
                         break;
                     }
                 }
                 if (!found)
                 {
-                    throw new InvalidOperationException($"无法通过经纬度获取城市信息");
+                    result.IsSuccess = false;
+                    result.ErrorMessage = "无法通过经纬度获取城市信息";
+                    throw new InvalidOperationException(result.ErrorMessage);
+                }
+                if (usedPrecision < 4)
+                {
+                    result.IsPrecisionDegraded = true;
+                    result.DegradedPrecision = usedPrecision;
                 }
             }
             else
@@ -300,12 +315,19 @@ public class WeatherService : ObservableRecipient, IHostedService, IWeatherServi
                 else
                 {
                     Logger.LogError("无法通过CityId获取城市信息");
+                    result.IsSuccess = false;
+                    result.ErrorMessage = "无法通过CityId获取城市信息";
                 }
             }
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "获取城市信息失败。");
+            if (result.ErrorMessage == null)
+            {
+                result.IsSuccess = false;
+                result.ErrorMessage = ex.Message;
+            }
         }
 
         // 请求天气信息
@@ -343,13 +365,17 @@ public class WeatherService : ObservableRecipient, IHostedService, IWeatherServi
 
             Settings.LastWeatherInfo = info;
             IsWeatherRefreshed = true;
+            result.IsSuccess = true;
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "获取天气信息失败。");
+            result.IsSuccess = false;
+            result.ErrorMessage = ex.Message;
         }
 
         RulesetService.NotifyStatusChanged();
+        return result;
     }
 
     public string GetWeatherTextByCode(string code)

@@ -115,6 +115,19 @@ public partial class WeatherSettingsViewModel : ObservableRecipient
         }
     }
 
+    public async Task<WeatherQueryResult> RefreshWeatherWithResultAsync()
+    {
+        IsRefreshingWeather = true;
+        try
+        {
+            return await _weatherService.QueryWeatherWithResultAsync();
+        }
+        finally
+        {
+            IsRefreshingWeather = false;
+        }
+    }
+
     public async Task SelectCityAsync(City? city)
     {
         if (city == null) return;
