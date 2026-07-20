@@ -242,22 +242,21 @@ public class WeatherService : ObservableRecipient, IHostedService, IWeatherServi
             try
             {
                 var pos = await LocationService.GetLocationAsync();
-                SettingsService.Settings.WeatherLongitude = Math.Round(pos.Longitude, 4);
-                SettingsService.Settings.WeatherLatitude = Math.Round(pos.Latitude, 4);
+                Settings.WeatherLongitude = Math.Round(pos.Longitude, 4);
+                Settings.WeatherLatitude = Math.Round(pos.Latitude, 4);
             }
             catch (Exception exception)
             {
                 Logger.LogError(exception, "无法获取当前位置");
             }
         }
-        
+
         var cityLatitude = string.Empty;
         var cityLongitude = string.Empty;
         
         // 获取城市信息
         try
         {
-            using var http = new HttpClient();
             if (Settings.WeatherLocationSource == 1)
             {
                 var precisions = new[] { 4, 3, 2, 1, 0 };
@@ -335,7 +334,6 @@ public class WeatherService : ObservableRecipient, IHostedService, IWeatherServi
                 {
                     Logger.LogError("无法通过CityId获取城市信息");
                     result.ErrorMessage = "无法通过CityId获取城市信息";
-                    RulesetService.NotifyStatusChanged();
                     return result;
                 }
             }
@@ -344,14 +342,12 @@ public class WeatherService : ObservableRecipient, IHostedService, IWeatherServi
         {
             Logger.LogError(ex, "获取城市信息失败。");
             result.ErrorMessage = ex.Message;
-            RulesetService.NotifyStatusChanged();
             return result;
         }
 
         // 请求天气信息
         try
         {
-            using var http = new HttpClient();
             Logger.LogTrace("天气请求信息: CityId={CityId}, Longitude={Longitude}, Latitude={Latitude}, LocationSource={LocationSource}",
                 Settings.CityId, cityLongitude, cityLatitude, Settings.WeatherLocationSource);
             var uri =
@@ -361,14 +357,16 @@ public class WeatherService : ObservableRecipient, IHostedService, IWeatherServi
 
             // 排除天气预警
             var validExclusions = Settings.ExcludedWeatherAlerts
-                .Where(x => !string.IsNullOrWhiteSpace(x));
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .ToArray();
 
-            info.Alerts.RemoveAll(alert =>
-                validExclusions
-                    .Any(exclusion =>
+            if (validExclusions.Length > 0)
+            {
+                info.Alerts.RemoveAll(alert =>
+                    validExclusions.Any(exclusion =>
                         alert.Title.Contains(exclusion) || alert.Detail.Contains(exclusion)
-                )
-            );
+                    ));
+            }
 
             // 去重天气预警
             var latest = info.Alerts
@@ -391,8 +389,11 @@ public class WeatherService : ObservableRecipient, IHostedService, IWeatherServi
             result.IsSuccess = false;
             result.ErrorMessage = ex.Message;
         }
+        finally
+        {
+            RulesetService.NotifyStatusChanged();
+        }
 
-        RulesetService.NotifyStatusChanged();
         return result;
     }
 
