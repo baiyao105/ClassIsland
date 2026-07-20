@@ -265,26 +265,45 @@ public class WeatherService : ObservableRecipient, IHostedService, IWeatherServi
                 int usedPrecision = 4;
                 foreach (var precision in precisions)
                 {
-                    var lon = Math.Round(Settings.WeatherLongitude, precision);
-                    var lat = Math.Round(Settings.WeatherLatitude, precision);
-                    var uri = $"{Schema}://weatherapi.market.xiaomi.com/wtr-v3/location/city/geo?longitude={lon}&latitude={lat}&locale=zh_cn";
-                    Logger.LogInformation("获取城市信息： {}", uri);
-                    var cityInfoList = await WebRequestHelper.Default.GetJson<List<CityInfo>>(new Uri(uri));
-                    var cityInfo = cityInfoList.FirstOrDefault();
-                    Logger.LogDebug("城市信息: Count={Count}, Status={Status}, FirstLocationKey={LocationKey}, FirstName={Name}, FirstAffiliation={Affiliation}, FirstLongitude={Longitude}, FirstLatitude={Latitude}",
-                        cityInfoList?.Count ?? 0, cityInfo?.Status, cityInfo?.LocationKey, cityInfo?.Name, cityInfo?.Affiliation, cityInfo?.Longitude,
-                        cityInfo?.Latitude);
-                    if (cityInfo != null && cityInfo.Status == 0 && !string.IsNullOrWhiteSpace(cityInfo.LocationKey))
+                    var factor = Math.Pow(10, precision);
+                    List<(double lon, double lat)> candidates;
+                    if (precision == 0)
                     {
-                        cityLatitude = lat.ToString(CultureInfo.InvariantCulture);
-                        cityLongitude = lon.ToString(CultureInfo.InvariantCulture);
-                        Settings.CityId = cityInfo.LocationKey;
-                        Settings.CityName = $"{cityInfo.Name} ({cityInfo.Affiliation})";
-                        Logger.LogDebug("城市信息精度: {Precision}", precision);
-                        usedPrecision = precision;
-                        found = true;
-                        break;
+                        candidates = new List<(double, double)>
+                        {
+                            (Math.Round(Settings.WeatherLongitude, 0), Math.Round(Settings.WeatherLatitude, 0))
+                        };
                     }
+                    else
+                    {
+                        candidates = new List<(double, double)>
+                        {
+                            (Math.Round(Settings.WeatherLongitude, precision), Math.Round(Settings.WeatherLatitude, precision)),
+                            (Math.Truncate(Settings.WeatherLongitude * factor) / factor, Math.Truncate(Settings.WeatherLatitude * factor) / factor)
+                        };
+                    }
+                    foreach (var (lon, lat) in candidates)
+                    {
+                        var uri = $"{Schema}://weatherapi.market.xiaomi.com/wtr-v3/location/city/geo?longitude={lon}&latitude={lat}&locale=zh_cn";
+                        Logger.LogInformation("获取城市信息： {}", uri);
+                        var cityInfoList = await WebRequestHelper.Default.GetJson<List<CityInfo>>(new Uri(uri));
+                        var cityInfo = cityInfoList.FirstOrDefault();
+                        Logger.LogDebug("城市信息: Count={Count}, Status={Status}, FirstLocationKey={LocationKey}, FirstName={Name}, FirstAffiliation={Affiliation}, FirstLongitude={Longitude}, FirstLatitude={Latitude}",
+                            cityInfoList?.Count ?? 0, cityInfo?.Status, cityInfo?.LocationKey, cityInfo?.Name, cityInfo?.Affiliation, cityInfo?.Longitude,
+                            cityInfo?.Latitude);
+                        if (cityInfo != null && cityInfo.Status == 0 && !string.IsNullOrWhiteSpace(cityInfo.LocationKey))
+                        {
+                            cityLatitude = lat.ToString(CultureInfo.InvariantCulture);
+                            cityLongitude = lon.ToString(CultureInfo.InvariantCulture);
+                            Settings.CityId = cityInfo.LocationKey;
+                            Settings.CityName = $"{cityInfo.Name} ({cityInfo.Affiliation})";
+                            Logger.LogDebug("城市信息精度: {Precision}", precision);
+                            usedPrecision = precision;
+                            found = true;
+                            break;
+                        }
+                    }
+                    if (found) break;
                 }
                 if (!found)
                 {
